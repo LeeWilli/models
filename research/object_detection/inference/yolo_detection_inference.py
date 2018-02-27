@@ -16,11 +16,17 @@
 from __future__ import division
 
 import tensorflow as tf
+import numpy as np
+import json
+
+
+#sys.path.append('/home/wangli/code/projects/UVA/video-recognition-ae/yolo/darkflow/darkflow/')
+from ..cython_utils.cy_yolo2_findboxes import box_constructor
 
 from object_detection.core import standard_fields
 
-
-def build_input(tfrecord_paths):
+import pdb
+def build_input(meta, tfrecord_paths):
   """Builds the graph's input.
 
   Args:
@@ -44,11 +50,22 @@ def build_input(tfrecord_paths):
       })
   encoded_image = features[standard_fields.TfExampleFields.image_encoded]
   image_tensor = tf.image.decode_image(encoded_image, channels=3)
-  image_tensor.set_shape([None, None, 3])
-  image_tensor = tf.expand_dims(image_tensor, 0)
+  image_tensor_float = tf.image.convert_image_dtype(image_tensor, tf.float32)
+  image_tensor_float.set_shape([None, None, 3])
+  h, w, c = meta['inp_size']
+  image_tensor_float = tf.image.resize_images(image_tensor_float, [h,w])
+  image_tensor_float = tf.expand_dims(image_tensor_float, 0)
 
-  return serialized_example_tensor, image_tensor
+  return serialized_example_tensor, image_tensor_float
 
+
+def build_meta( meta_file):
+    """
+    return a meta
+    """
+    with open(meta_file, 'r') as fp:
+        meta = json.load(fp)
+    return meta
 
 def build_inference_graph(image_tensor, inference_graph_path):
   """Loads the inference graph and connects it to the input image.
@@ -71,33 +88,62 @@ def build_inference_graph(image_tensor, inference_graph_path):
   graph_def.MergeFromString(graph_content)
 
   tf.import_graph_def(
-      graph_def, name='', input_map={'image_tensor': image_tensor})
+      graph_def, name='', input_map={'input': image_tensor})
 
   g = tf.get_default_graph()
 
-  num_detections_tensor = tf.squeeze(
-      g.get_tensor_by_name('num_detections:0'), 0)
-  num_detections_tensor = tf.cast(num_detections_tensor, tf.int32)
-
   detected_boxes_tensor = tf.squeeze(
-      g.get_tensor_by_name('detection_boxes:0'), 0)
-  detected_boxes_tensor = detected_boxes_tensor[:num_detections_tensor]
+      g.get_tensor_by_name('output:0'), 0)
 
-  detected_scores_tensor = tf.squeeze(
-      g.get_tensor_by_name('detection_scores:0'), 0)
-  detected_scores_tensor = detected_scores_tensor[:num_detections_tensor]
+  return detected_boxes_tensor
 
-  detected_labels_tensor = tf.squeeze(
-      g.get_tensor_by_name('detection_classes:0'), 0)
-  detected_labels_tensor = tf.cast(detected_labels_tensor, tf.int64)
-  detected_labels_tensor = detected_labels_tensor[:num_detections_tensor]
+def process_box(meta, b, h, w, threshold):
+	max_indx = np.argmax(b.probs)
+	max_prob = b.probs[max_indx]
+	label = meta['labels'][max_indx]
+	if max_prob > threshold:
+		left  = int ((b.x - b.w/2.) * w)
+		right = int ((b.x + b.w/2.) * w)
+		top   = int ((b.y - b.h/2.) * h)
+		bot   = int ((b.y + b.h/2.) * h)
+		if left  < 0    :  left = 0
+		if right > w - 1: right = w - 1
+		if top   < 0    :   top = 0
+		if bot   > h - 1:   bot = h - 1
+		mess = '{}'.format(label)
+		return (left, right, top, bot, mess, max_indx, max_prob)
+	return None
 
-  return detected_boxes_tensor, detected_scores_tensor, detected_labels_tensor
+def yolo2googleout( meta, yolo_out, threshold=0.5):
+    """convert out to desired format
+    :param feed_dict:
+    :param img_shape:
+    :return: out
+    :return: detection_out
+    """
+    out = yolo_out.copy()
+    boxes = box_constructor(meta, out)
+    h, w, c = meta['inp_size']
+    out = [process_box(meta, b, h, w, threshold) for b in boxes]
+    out = [out1 for out1 in out if out1] #remove empty boxes
+    # out format: [[left, right, top, bot, mess, max_indx, confidence], ...]
+    #pdb.set_trace()
+    detection_out = np.vstack([to_tlbr(out1[:4]) for out1 in out])
+    scores = np.array([out1[-1] for out1 in out])
+    messes = np.array([out1[-3] for out1 in out])
 
+    return detection_out, scores, messes
+
+def to_tlbr(tlwh):
+    """Convert bounding box to format `(min x, min y, max x, max y)`, i.e.,
+    `(top left, bottom right)`.
+    """
+    ret = tlwh.copy()
+    ret[2:] += ret[:2]
+    return ret
 
 def infer_detections_and_add_to_example(
-    serialized_example_tensor, detected_boxes_tensor, detected_scores_tensor,
-    detected_labels_tensor, discard_image_pixels):
+    meta, serialized_example_tensor, detected_boxes_tensor, discard_image_pixels):
   """Runs the supplied tensors and adds the inferred detections to the example.
 
   Args:
@@ -113,12 +159,12 @@ def infer_detections_and_add_to_example(
     The de-serialized TF example augmented with the inferred detections.
   """
   tf_example = tf.train.Example()
-  (serialized_example, detected_boxes, detected_scores,
-   detected_classes) = tf.get_default_session().run([
-       serialized_example_tensor, detected_boxes_tensor, detected_scores_tensor,
-       detected_labels_tensor
+  (serialized_example, detected_items) = tf.get_default_session().run([
+       serialized_example_tensor, detected_boxes_tensor
    ])
-  detected_boxes = detected_boxes.T
+  #pdb.set_trace()
+  detected_boxes, detected_scores, detected_classes = yolo2googleout(meta, detected_items)
+  pdb.set_trace()
 
   tf_example.ParseFromString(serialized_example)
   feature = tf_example.features.feature
@@ -139,3 +185,4 @@ def infer_detections_and_add_to_example(
     del feature[standard_fields.TfExampleFields.image_encoded]
 
   return tf_example
+
