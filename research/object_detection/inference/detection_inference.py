@@ -94,7 +94,7 @@ def build_inference_graph(image_tensor, inference_graph_path):
 
   return detected_boxes_tensor, detected_scores_tensor, detected_labels_tensor
 
-
+import pdb
 def infer_detections_and_add_to_example(
     serialized_example_tensor, detected_boxes_tensor, detected_scores_tensor,
     detected_labels_tensor, discard_image_pixels):
@@ -120,6 +120,7 @@ def infer_detections_and_add_to_example(
    ])
   detected_boxes = detected_boxes.T
 
+  pdb.set_trace()
   tf_example.ParseFromString(serialized_example)
   feature = tf_example.features.feature
   feature[standard_fields.TfExampleFields.
