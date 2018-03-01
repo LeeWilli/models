@@ -37,6 +37,8 @@ metrics).
 import itertools
 import tensorflow as tf
 from object_detection.inference import yolo_detection_inference as detection_inference
+from object_detection.utils import label_map_util
+import pdb
 
 tf.flags.DEFINE_string('input_tfrecord_paths', None,
                        'A comma separated list of paths to input TFRecords.')
@@ -45,7 +47,9 @@ tf.flags.DEFINE_string('output_tfrecord_path', None,
 tf.flags.DEFINE_string('inference_graph', None,
                        'Path to the inference graph with embedded weights.')
 tf.flags.DEFINE_string('meta', None,
-                       'Path to the meta file.')
+                       'Path to the meta file from yolo.')
+tf.flags.DEFINE_string('label_map', None,
+                       'Path to the label map file from google detection.')
 tf.flags.DEFINE_boolean('discard_image_pixels', False,
                         'Discards the images in the output TFExamples. This'
                         ' significantly reduces the output size and is useful'
@@ -59,12 +63,22 @@ def main(_):
   tf.logging.set_verbosity(tf.logging.INFO)
 
   required_flags = ['input_tfrecord_paths', 'output_tfrecord_path',
-                    'inference_graph', 'meta']
+                    'inference_graph', 'meta', 'label_map']
   for flag_name in required_flags:
     if not getattr(FLAGS, flag_name):
       raise ValueError('Flag --{} is required'.format(flag_name))
 
+  ## Load meta data for yolo
   meta = detection_inference.build_meta(FLAGS.meta)
+
+  ## Load category_index of coco data from google detection
+  NUM_CLASSES = 90
+  label_map = label_map_util.load_labelmap(FLAGS.label_map)
+  categories = label_map_util.convert_label_map_to_categories(label_map, max_num_classes=NUM_CLASSES,
+                                                              use_display_name=True)
+  category_index = label_map_util.create_category_index(categories)
+  #pdb.set_trace()
+
   with tf.Session() as sess:
     input_tfrecord_paths = [
         v for v in FLAGS.input_tfrecord_paths.split(',') if v]
@@ -88,6 +102,7 @@ def main(_):
                                  counter)
           tf_example = detection_inference.infer_detections_and_add_to_example(
               meta,
+              category_index,
               serialized_example_tensor, detected_boxes_tensor,
               FLAGS.discard_image_pixels)
           tf_record_writer.write(tf_example.SerializeToString())

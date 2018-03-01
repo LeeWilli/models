@@ -98,23 +98,25 @@ def build_inference_graph(image_tensor, inference_graph_path):
   return detected_boxes_tensor
 
 def process_box(meta, b, h, w, threshold):
-	max_indx = np.argmax(b.probs)
-	max_prob = b.probs[max_indx]
-	label = meta['labels'][max_indx]
-	if max_prob > threshold:
-		left  = int ((b.x - b.w/2.) * w)
-		right = int ((b.x + b.w/2.) * w)
-		top   = int ((b.y - b.h/2.) * h)
-		bot   = int ((b.y + b.h/2.) * h)
-		if left  < 0    :  left = 0
-		if right > w - 1: right = w - 1
-		if top   < 0    :   top = 0
-		if bot   > h - 1:   bot = h - 1
-		mess = '{}'.format(label)
-		return (left, right, top, bot, mess, max_indx, max_prob)
-	return None
+    max_indx = np.argmax(b.probs)
+    max_prob = b.probs[max_indx]
+    label = meta['labels'][max_indx]
+    #pdb.set_trace()
+    if max_prob > threshold:
+        left  = int ((b.x - b.w/2.) * w)
+        right = int ((b.x + b.w/2.) * w)
+        top   = int ((b.y - b.h/2.) * h)
+        bot   = int ((b.y + b.h/2.) * h)
+        if left  < 0    :  left = 0
+        if right > w - 1: right = w - 1
+        if top   < 0    :   top = 0
+        if bot   > h - 1:   bot = h - 1
+        mess = '{}'.format(label)
+        #return (left, right, top, bot, mess, max_indx, max_prob)
+        return (top, left, bot, right, mess, max_indx, max_prob)
+    return None
 
-def yolo2googleout( meta, yolo_out, threshold=0.5):
+def yolo2googleout( meta, category_index, yolo_out, threshold=0.3):
     """convert out to desired format
     :param feed_dict:
     :param img_shape:
@@ -128,22 +130,52 @@ def yolo2googleout( meta, yolo_out, threshold=0.5):
     out = [out1 for out1 in out if out1] #remove empty boxes
     # out format: [[left, right, top, bot, mess, max_indx, confidence], ...]
     #pdb.set_trace()
-    detection_out = np.vstack([to_tlbr(out1[:4]) for out1 in out])
+    try:
+        detection_out = np.array([norm_boxes(meta, out1[:4]) for out1 in out])
+        #pdb.set_trace()
+    except ValueError:
+        #pdb.set_trace()
+        detection_out = []
     scores = np.array([out1[-1] for out1 in out])
-    messes = np.array([out1[-3] for out1 in out])
+    messes = [out1[-3] for out1 in out]
+    ## the id of objects in coco is different between google detection and yolo detection
+    ## change the id of yolo to google expression through category_index
+    classes = []
+    for mess in messes:
+        c = [category['id'] for key, category in category_index.items() if category['name'] == mess]
+        if c:
+            classes.append(c[0])
+        else:
+            classes.append(0)
 
-    return detection_out, scores, messes
+    classes = np.array(classes)
+    classes = classes.reshape(-1,)
+    #classes = np.array([out1[-2] for out1 in out])
+    return detection_out, scores, classes #messes
 
 def to_tlbr(tlwh):
     """Convert bounding box to format `(min x, min y, max x, max y)`, i.e.,
     `(top left, bottom right)`.
     """
-    ret = tlwh.copy()
+    ret = np.array(tlwh)
     ret[2:] += ret[:2]
     return ret
 
+def norm_boxes(meta, boxes):
+    """Convert bounding box to format `(min x, min y, max x, max y)`, i.e.,
+    `(top left, bottom right)`.
+    """
+    h, w, c = meta['inp_size']
+    ret = np.array(boxes).astype(float)
+    ret[0] = ret[0]/h
+    ret[2] = ret[2]/h
+    ret[1] = ret[1]/w
+    ret[3] = ret[3]/w
+    #pdb.set_trace()
+    return ret
+
 def infer_detections_and_add_to_example(
-    meta, serialized_example_tensor, detected_boxes_tensor, discard_image_pixels):
+    meta, category_index, serialized_example_tensor, detected_boxes_tensor, discard_image_pixels):
   """Runs the supplied tensors and adds the inferred detections to the example.
 
   Args:
@@ -163,23 +195,33 @@ def infer_detections_and_add_to_example(
        serialized_example_tensor, detected_boxes_tensor
    ])
   #pdb.set_trace()
-  detected_boxes, detected_scores, detected_classes = yolo2googleout(meta, detected_items)
-  pdb.set_trace()
+  detected_boxes, detected_scores, detected_classes = yolo2googleout(meta, category_index, detected_items)
+  #pdb.set_trace()
 
   tf_example.ParseFromString(serialized_example)
   feature = tf_example.features.feature
-  feature[standard_fields.TfExampleFields.
-          detection_score].float_list.value[:] = detected_scores
-  feature[standard_fields.TfExampleFields.
-          detection_bbox_ymin].float_list.value[:] = detected_boxes[0]
-  feature[standard_fields.TfExampleFields.
-          detection_bbox_xmin].float_list.value[:] = detected_boxes[1]
-  feature[standard_fields.TfExampleFields.
-          detection_bbox_ymax].float_list.value[:] = detected_boxes[2]
-  feature[standard_fields.TfExampleFields.
-          detection_bbox_xmax].float_list.value[:] = detected_boxes[3]
-  feature[standard_fields.TfExampleFields.
-          detection_class_label].int64_list.value[:] = detected_classes
+  if(detected_boxes != []):
+      try:
+          detected_boxes = detected_boxes.T
+          feature[standard_fields.TfExampleFields.
+                  detection_score].float_list.value[:] = detected_scores
+          feature[standard_fields.TfExampleFields.
+                  detection_bbox_ymin].float_list.value[:] = detected_boxes[0]
+          feature[standard_fields.TfExampleFields.
+                  detection_bbox_xmin].float_list.value[:] = detected_boxes[1]
+          feature[standard_fields.TfExampleFields.
+                  detection_bbox_ymax].float_list.value[:] = detected_boxes[2]
+          feature[standard_fields.TfExampleFields.
+                  detection_bbox_xmax].float_list.value[:] = detected_boxes[3]
+          feature[standard_fields.TfExampleFields.
+                  detection_class_label].int64_list.value[:] = detected_classes
+      except TypeError:
+          tf.logging.info(" a TypeError")
+          #pdb.set_trace()
+
+  #print(detected_classes)
+  #print(detected_scores)
+  #print(detected_boxes.T)
 
   if discard_image_pixels:
     del feature[standard_fields.TfExampleFields.image_encoded]

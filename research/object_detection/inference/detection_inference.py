@@ -120,7 +120,7 @@ def infer_detections_and_add_to_example(
    ])
   detected_boxes = detected_boxes.T
 
-  pdb.set_trace()
+  #pdb.set_trace()
   tf_example.ParseFromString(serialized_example)
   feature = tf_example.features.feature
   feature[standard_fields.TfExampleFields.
@@ -135,7 +135,9 @@ def infer_detections_and_add_to_example(
           detection_bbox_xmax].float_list.value[:] = detected_boxes[3]
   feature[standard_fields.TfExampleFields.
           detection_class_label].int64_list.value[:] = detected_classes
-
+  print(detected_classes)
+  print(detected_scores)
+  print(detected_boxes.T)
   if discard_image_pixels:
     del feature[standard_fields.TfExampleFields.image_encoded]
 
