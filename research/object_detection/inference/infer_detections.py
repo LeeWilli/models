@@ -37,6 +37,7 @@ metrics).
 import itertools
 import tensorflow as tf
 from object_detection.inference import detection_inference
+import datetime
 
 tf.flags.DEFINE_string('input_tfrecord_paths', None,
                        'A comma separated list of paths to input TFRecords.')
@@ -51,7 +52,6 @@ tf.flags.DEFINE_boolean('discard_image_pixels', False,
                         ' images (e.g. when computing evaluation measures).')
 
 FLAGS = tf.flags.FLAGS
-
 
 def main(_):
   tf.logging.set_verbosity(tf.logging.INFO)
@@ -77,6 +77,9 @@ def main(_):
         FLAGS.output_tfrecord_path))
     sess.run(tf.local_variables_initializer())
     tf.train.start_queue_runners()
+
+    print("start running ")
+    starttime = datetime.datetime.now()
     with tf.python_io.TFRecordWriter(
         FLAGS.output_tfrecord_path) as tf_record_writer:
       try:
@@ -90,7 +93,9 @@ def main(_):
           tf_record_writer.write(tf_example.SerializeToString())
       except tf.errors.OutOfRangeError:
         tf.logging.info('Finished processing records')
-
+      endtime = datetime.datetime.now()
+      print("running time is ")
+      print((endtime - starttime).seconds)
 
 if __name__ == '__main__':
   tf.app.run()
