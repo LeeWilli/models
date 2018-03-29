@@ -1,7 +1,7 @@
 #!/bin/bash
 
 SPLIT=validation  # or test
-MODEL=ssd_mobilenet_v1_coco_2017_11_08 #ssd_mobilenet_v1_coco_2018_1
+MODEL=ssd_mobilenet_v1_coco_2018_1 #ssd_mobilenet_v1_coco_2018_1
 TF_RECORD_FILES=$(ls -1 ${SPLIT}_tfrecords/* | tr '\n' ',')
 PYTHONPATH=$PYTHONPATH:$(readlink -f ..) \
 python3 -m object_detection.inference.infer_detections \
