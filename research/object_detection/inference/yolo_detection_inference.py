@@ -19,7 +19,6 @@ import tensorflow as tf
 import numpy as np
 import json
 
-
 #sys.path.append('/home/wangli/code/projects/UVA/video-recognition-ae/yolo/darkflow/darkflow/')
 from ..cython_utils.cy_yolo2_findboxes import box_constructor
 
