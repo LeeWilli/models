@@ -96,7 +96,7 @@ def main(_):
     sess.run(tf.local_variables_initializer())
     tf.train.start_queue_runners()
 
-    print("start running ")
+    print("entering into loop ")
     starttime = datetime.datetime.now()
     with tf.python_io.TFRecordWriter(
         FLAGS.output_tfrecord_path) as tf_record_writer:
@@ -104,11 +104,14 @@ def main(_):
         for counter in itertools.count():
           tf.logging.log_every_n(tf.logging.INFO, 'Processed %d images...', 10,
                                  counter)
+          t0 = datetime.datetime.now()
           tf_example = detection_inference.infer_detections_and_add_to_example(
               meta,
               category_index,
               serialized_example_tensor, detected_boxes_tensor,
               FLAGS.discard_image_pixels)
+          t1 = datetime.datetime.now()
+          tf.logging.info('processed an image in %d ms', (t1 - t0).microseconds / 1000)
           tf_record_writer.write(tf_example.SerializeToString())
       except tf.errors.OutOfRangeError:
         tf.logging.info('Finished processing records')
